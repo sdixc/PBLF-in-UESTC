@@ -1,0 +1,4 @@
+﻿  main.cpp
+C:\Users\29069\source\repos\植物大战僵尸\main.cpp(40,13): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+C:\Users\29069\source\repos\植物大战僵尸\main.cpp(87,12): warning C4244: “参数”: 从“time_t”转换到“unsigned int”，可能丢失数据
+  植物大战僵尸.vcxproj -> C:\Users\29069\source\repos\植物大战僵尸\x64\Debug\植物大战僵尸.exe
