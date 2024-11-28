@@ -2,7 +2,8 @@
 #include <graphics.h>
 #include "tools.h"
 #include <time.h>
-
+#include <mmsystem.h>
+#pragma comment(lib, "winmm.lib")
 #define WIN_WIDTH	1000
 #define	WIN_HEIGHT	600
 
@@ -16,24 +17,35 @@ IMAGE imgBar5;
 IMAGE imgCards[ZHI_WU_COUNT];
 IMAGE *imgZhiWu[ZHI_WU_COUNT][20];
 
-int curX, curY;//µ±Ç°Ñ¡ÖĞµÄÖ²Îï£¬ÔÚÒÆ¶¯¹ı³ÌÖĞµÄÎ»ÖÃ
-int curZhiWu;	//0Î´Ñ¡ÖĞ 1µÚÒ»ÖÖÖ²Îï
+int curX, curY;//å½“å‰é€‰ä¸­çš„æ¤ç‰©ï¼Œåœ¨ç§»åŠ¨è¿‡ç¨‹ä¸­çš„ä½ç½®
+int curZhiWu;	//0æœªé€‰ä¸­ 1ç¬¬ä¸€ç§æ¤ç‰©
 
 struct zhiwu {
-	int type;			//0Ã»ÓĞÖ²Îï 1Ñ¡ÔñµÚÒ»ÖÖÖ²Îï
-	int frameIndex;		//ĞòÁĞÖ¡µÄĞòºÅ
+	int type;			//0æ²¡æœ‰æ¤ç‰© 1é€‰æ‹©ç¬¬ä¸€ç§æ¤ç‰©
+	int frameIndex;		//åºåˆ—å¸§çš„åºå·
 };
 
 struct zhiwu map[3][9];
 struct sunshineBall {
-	int x , y;//Æ®Âä¹ı³ÌÎ»ÖÃ x²»±ä
+	int x , y;//é£˜è½è¿‡ç¨‹ä½ç½® xä¸å˜
 	int frameIndex;
-	int destY;//Æ®ÂäÖÕµãy×ø±ê
-	bool used;	//ÊÇ·ñÔÚÊ¹ÓÃ
+	int destY;//é£˜è½ç»ˆç‚¹yåæ ‡
+	bool used;//æ˜¯å¦åœ¨ä½¿ç”¨
+        int timer;
+        float xoff
+        float yoff
 };
 struct sunshineBall balls[10];
 IMAGE imgSunshineBall[29];
-
+int sunshine=50;
+struct zm {
+    int x, y;
+    int frameIndex;
+    bool used;
+    int speed;
+};
+struct zm zms[10];
+IMAGE imgZM[22];
 
 bool fileExist(const char* name) {
 
@@ -49,14 +61,14 @@ bool fileExist(const char* name) {
 
 
 void gameInit() {
-	//¼ÓÔØ±³¾°Í¼Æ¬
+	//åŠ è½½èƒŒæ™¯å›¾ç‰‡
 	loadimage(&imgBg, "res/bg.jpg");
 	loadimage(&imgBar5, "res/bar5.png");
 
 	memset(imgZhiWu, 0, sizeof(imgZhiWu));
 	memset(map, 0, sizeof(map));
 
-	//³õÊ¼»¯Ö²Îï¿¨ÅÆ
+	//åˆå§‹åŒ–æ¤ç‰©å¡ç‰Œ
 	char name[64];
 	for (int i = 0; i < ZHI_WU_COUNT; i++) {
 		sprintf_s(name, sizeof(name), "res/Cards/card_%d.png", i + 1);
@@ -64,7 +76,7 @@ void gameInit() {
 	
 		for (int j = 0; j < 20; j++) {
 			sprintf_s(name, sizeof(name), "res/zhiwu/%d/%d.png", i,j + 1);
-			//ÏÈÅĞ¶ÏÕâ¸öÎÄ¼şÊÇ·ñ´æÔÚ
+			//å…ˆåˆ¤æ–­è¿™ä¸ªæ–‡ä»¶æ˜¯å¦å­˜åœ¨
 			if (fileExist(name)) {
 				imgZhiWu[i][j] = new IMAGE;
 				loadimage(imgZhiWu[i][j], name);
@@ -83,15 +95,48 @@ void gameInit() {
 		loadimage(&imgSunshineBall[i], name);
 	}
 
-	//ÅäÖÃËæ»úÖÖ×Ó
+	//é…ç½®éšæœºç§å­
 	srand(time(NULL));
 
-	//´´½¨ÓÎÏ·Í¼ĞÎ´°¿Ú
+	//åˆ›å»ºæ¸¸æˆå›¾å½¢çª—å£
 	initgraph(WIN_WIDTH,WIN_HEIGHT, 1);
-	
 
+	// è®¾ç½®å­—ä½“
+LOGFONT f;
+gettextstyle(&f);
+f.lfHeight = 30;
+f.lfWeight = 15;
+strcpy(f.lfFaceName, "Segoe UI Black");
+f.lfQuality = ANTIALIASED_QUALITY; // æŠ—é”¯é½¿æ•ˆæœ
+settextstyle(&f);
+setbkmode(TRANSPARENT);
+setcolor(BLACK);
+
+// åˆå§‹åŒ–åƒµå°¸æ•°æ®
+memset(zms, 0, sizeof(zms));
+for (int i = 0; i < 22; i++) {
+    sprintf_s(name, sizeof(name), "res/zombie/%d.png", i);
+    loadimage(&imgZM[i], name);
 }
 
+char scoreText[8];
+sprintf_s(scoreText,sizeof(scoreText),"%d",sunshine);
+outtextxy(276,67,scoreText);
+drawZM();
+EndBatchDraw();//ç»“æŸåŒç¼“å†²
+void collectSunshine(ExMessage* msg) {
+    int count = sizeof(balls) / sizeof(balls[0]);
+    int w = imgSunshineBall[0].getWidth();
+    int h = imgSunshineBall[0].getHeight();
+    for (int i = 0; i < count; i++) {
+        if (balls[i].used) {
+            int x = balls[i].x;
+            int y = balls[i].y;
+            if (msg->x > x && msg->x < x + w &&
+                msg->y > y && msg->y < y + h) {
+                balls[i].used = false;
+                sunshine += 25;
+                mciSendString("play res/sunshine.mp3",0,0,0);
 void userClick() {
 	ExMessage msg;
 	static int status = 0;
@@ -102,6 +147,8 @@ void userClick() {
 				//printf("%d\n", index);
 				status = 1;
 				curZhiWu = index + 1;
+				else{
+					collectSunshine(&msg);
 			}
 		}else if(msg.message == WM_MOUSEMOVE &&status == 1){
 			curX = msg.x;
@@ -122,9 +169,20 @@ void userClick() {
 		}
 	}
 }
-
+void drawZM() {
+    int zmCount = sizeof(zms) / sizeof(zms[0]);
+    // éå†æ¯ä¸ªåƒµå°¸
+    for (int i = 0; i < zmCount; i++) {
+        if (zms[i].used) {
+            // è·å–åƒµå°¸å¯¹åº”çš„å›¾åƒæŒ‡é’ˆï¼ŒimgZMæ˜¯å›¾åƒæ•°ç»„ï¼ŒframeIndexæ˜¯å›¾åƒå¸§ç´¢å¼•
+            IMAGE* img = &imgZM[zms[i].frameIndex];
+            // åœ¨æŒ‡å®šä½ç½®ç»˜åˆ¶å›¾åƒï¼Œxå’Œyæ˜¯åƒµå°¸çš„åæ ‡ï¼Œimg->getheight()è·å–å›¾åƒé«˜åº¦
+            putimagePNG(zms[i].x, zms[i].y - img->getheight(), img);
+        }
+    }
+}
 void updateWindow() {
-	BeginBatchDraw();//¿ªÊ¼»º³å
+	BeginBatchDraw();//å¼€å§‹ç¼“å†²
 
 	putimage(0, 0, &imgBg);
 	putimagePNG(250, 0, &imgBar5);
@@ -148,7 +206,7 @@ void updateWindow() {
 		}
 	}
 
-	//äÖÈ¾ÍÏ¶¯¹ı³ÌÖĞµÄÖ²Îï
+	//æ¸²æŸ“æ‹–åŠ¨è¿‡ç¨‹ä¸­çš„æ¤ç‰©
 	if (curZhiWu > 0) {
 		IMAGE* img = imgZhiWu[curZhiWu - 1][0];
 		putimagePNG(curX - img->getwidth() / 2, curY - img->getheight() / 2, img);
@@ -161,7 +219,7 @@ void updateWindow() {
 			putimagePNG(balls[i].x, balls[i].y, img);
 		}
 	}
-	EndBatchDraw();//½áÊøË«»º³å
+	EndBatchDraw();//ç»“æŸåŒç¼“å†²
 }
 
 
@@ -183,6 +241,8 @@ void creatSunshine() {
 		balls[i].x = 260 + rand() % (900 - 260);
 		balls[i].y = 60;
 		balls[i].destY = (rand() % 4) * 90 + 200;
+		balls[i].xoff = 0;
+		balls[i].yoff = 0;
 	}
 }
 
@@ -199,7 +259,52 @@ void updateSunshine() {
 		}
 	}
 }
+void createZM() {
+static int zmFre = 300;
+static int count = 0;
+    count++;
+    if (count > zmFre) {
+        count = 0;
+        zmFre = rand() % 200 + 300;
+    }
+    int i;
+    int zmMax = sizeof(zms) / sizeof(zms[0]);
+    for (i = 0; i < zmMax && zms[i].used; i++);
+    if (i < zmMax) {
+        zms[i].used = true;
+        zms[i].x = WIN_WIDTH;
+        zms[i].y = 172 + (1 + rand() % 3) * 100;
+        zms[i].speed = 1;
 
+void updateZM() {
+    int zmMax = sizeof(zms) / sizeof(zms[0]);
+	static int count = 0;
+    count++;
+    if (count > 2) {
+        count = 0;
+    // æ›´æ–°åƒµå°¸çš„ä½ç½®
+    for (int i = 0; i < zmMax; i++) {
+        if (zms[i].used) {
+            zms[i].x -= zms[i].speed;
+            if (zms[i].x < 170) {
+                std::cout << "GAME OVER\n";
+                MessageBox(NULL, "over", "over", 0); 
+                exit(0); 
+            }
+        }
+    }
+}
+static int count2 = 0;
+    count2++;
+    if (count2 > 4) {
+        count2 = 0;
+    for (int i = 0; i < zmMax; i++) {
+        if (zms[i].used) {
+            zms[i].frameIndex = (zms[i].frameIndex + 1) % 22;
+        }
+    }
+}
+    }
 void updateGame() {
 	for (int i = 0; i < 3; i++) {
 		for (int j = 0; j < 9; j++) {
@@ -215,6 +320,8 @@ void updateGame() {
 	}
 	creatSunshine();
 	updateSunshine();
+	createZM();
+	updateZM();
 }
 
 void startUI() {
