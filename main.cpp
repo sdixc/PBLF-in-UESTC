@@ -6,7 +6,7 @@
 #pragma comment(lib, "winmm.lib")
 #define WIN_WIDTH	1000
 #define	WIN_HEIGHT	600
-
+,,,
 enum 
 {
 	WAN_DOU, XIANG_RI_KUI, ZHI_WU_COUNT
