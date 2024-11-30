@@ -2,6 +2,7 @@
 #include <graphics.h>
 #include "tools.h"
 #include <time.h>
+#include <math.h>
 #include <mmsystem.h>
 #pragma comment(lib, "winmm.lib")
 #define WIN_WIDTH	1000
@@ -31,8 +32,8 @@ struct sunshineBall {
 	int destY;//飘落终点y坐标
 	bool used;//是否在使用
         int timer;
-        float xoff
-        float yoff
+        float xoff;
+        float yoff;
 };
 struct sunshineBall balls[10];
 IMAGE imgSunshineBall[29];
@@ -42,9 +43,25 @@ struct zm {
     int frameIndex;
     bool used;
     int speed;
+    int row ;
+    int blood; 
 };
 struct zm zms[10];
 IMAGE imgZM[22];
+
+//子弹的数据类型
+struct bullet {
+    int x, y;
+    int row;
+    bool used;
+    int speed;
+    bool blast;
+    int frameIndex;
+};
+
+struct bullet bullets[30];
+IMAGE imgBulletNormal;
+IMAGE imgBullBlast[4];
 
 bool fileExist(const char* name) {
 
@@ -117,12 +134,37 @@ for (int i = 0; i < 22; i++) {
     sprintf_s(name, sizeof(name), "res/zombie/%d.png", i);
     loadimage(&imgZM[i], name);
 }
-
+loadimage(&imgBulletNormal, "res/bullets/bullet_normal.png");
+memset(bullets, 0, sizeof(bullets));
+}
+// 初始化豌豆子弹的帧图片数组
+loadimage(&imgBullBlast[3], "res/bullets/bullet_blast.png");
+for (int i = 0; i < 3; i++) {
+    float k = (i + 1) * 0.2;
+    loadimage(&imgBullBlast[i], "res/bullets/bullet_blast.png",
+              imgBullBlast[3].getwidth() * k,
+              imgBullBlast[3].getheight() * k, true);
+}
+}
 char scoreText[8];
 sprintf_s(scoreText,sizeof(scoreText),"%d",sunshine);
 outtextxy(276,67,scoreText);
+
 drawZM();
+
+int bulletMax = sizeof(bullets) / sizeof(bullets[0]);
+for (int i = 0; i < bulletMax; i++) {
+    if (bullets[i].used) {
+	    if (bullets[i].blast) {
+            IMAGE* img = &imgBullBlast[bullets[i].frameIndex];
+            putimagePNG(bullets[i].x, bullets[i].y, img);
+        } else {
+        putimagePNG(bullets[i].x, bullets[i].y, &imgBulletNormal);
+    }
+}
+}
 EndBatchDraw();//结束双缓冲
+
 void collectSunshine(ExMessage* msg) {
     int count = sizeof(balls) / sizeof(balls[0]);
     int w = imgSunshineBall[0].getWidth();
@@ -134,8 +176,11 @@ void collectSunshine(ExMessage* msg) {
             if (msg->x > x && msg->x < x + w &&
                 msg->y > y && msg->y < y + h) {
                 balls[i].used = false;
-                sunshine += 25;
+               //sunshine += 25;
                 mciSendString("play res/sunshine.mp3",0,0,0);
+	    }
+	}
+    }
 void userClick() {
 	ExMessage msg;
 	static int status = 0;
@@ -213,7 +258,7 @@ void updateWindow() {
 
 	int ballMax = sizeof(balls) / sizeof(balls[0]);
 	for (int i = 0; i < ballMax; i++) {
-		if (balls[i].used) {
+		if (balls[i].used||balls[i].xoff) {
 			IMAGE* img = &imgSunshineBall[balls[i].frameIndex];
 			putimagePNG(balls[i].x, balls[i].y, img);
 		}
@@ -250,13 +295,30 @@ void updateSunshine() {
 	for (int i = 0; i < BallMax; i++) {
 		if (balls[i].used) {
 			balls[i].frameIndex = (balls[i].frameIndex + 1) % 29;
-			balls[i].y += 2;
-
+			if(balls[i].timer==0)
+			{balls[i].y += 2;
+			}
 			if (balls[i].y >= balls[i].destY) {
-				balls[i].used = false;
+				balls[i].timer++;
+				if(balls[i].timer>100)
+				{balls[i].used = false;
 			}
 		}
-	}
+	}else if (balls[i].xoff) {
+			 float destY = 0;
+        float destX = 262;
+        float angle = atan((balls[i].y - destY) / (balls[i].x - destX));
+        balls[i].xoff = 4 * cos(angle);
+        balls[i].yoff = 4 * sin(angle);
+			
+    balls[i].x += balls[i].xoff;
+    balls[i].y += balls[i].yoff;
+    if (balls[i].y < 0 || balls[i].x < 262) {
+        balls[i].xoff = 0;
+        balls[i].yoff = 0;
+        sunshine += 25;
+    }
+}
 }
 void createZM() {
 static int zmFre = 300;
@@ -272,8 +334,13 @@ static int count = 0;
     if (i < zmMax) {
         zms[i].used = true;
         zms[i].x = WIN_WIDTH;
-        zms[i].y = 172 + (1 + rand() % 3) * 100;
-        zms[i].speed = 1;
+	zms[i].row = rand() % 3;
+        zms[i].y = 172 + (1 + zms[i].row) * 100;
+        zms[i].speed = 1; 
+	zms[i].blood = 100;
+    }
+}
+}
 
 void updateZM() {
     int zmMax = sizeof(zms) / sizeof(zms[0]);
@@ -304,6 +371,75 @@ static int count2 = 0;
     }
 }
     }
+void shoot(){
+int lines[3] = {0};
+    int zmCount = sizeof(zms) / sizeof(zms[0]);
+    int bulletMax = sizeof(bullets) / sizeof(bullets[0]);
+    int dangerX = WIN_WIDTH - imgZM[0].getwidth();
+    for (int i = 0; i < zmCount; i++)
+    {
+        if (zms[i].used && zms[i].x < dangerX)
+        {
+            lines[zms[i].row] = 1;
+        }
+    }
+    for (int i = 0; i < 3; i++)
+    {for (int j = 0; j < 9; j++) {
+        if (map[i][j].type == WAN_DOU + 1 && lines[i]) {
+            static int count = 0;
+            count++;
+if (count > 20) {
+    count = 0;
+    int k;
+    for (k = 0; k < bulletMax && bullets[k].used; k++) ;
+    if (k < bulletMax) {
+        bullets[k].used = true;
+        bullets[k].row = i;
+        bullets[k].speed = 6;
+	bullets[k].blast = false;
+	bullets[[k].frameIndex =  0;
+        int zWX = 256 + j * 81;
+        int zWY = 179 + i * 102 + 14;
+        bullets[k].x = zWX + imgZhiWuMap[i][j].type - 1 [0] -> getwidth() - 10;
+        bullets[k].y = zWY + 5;
+    }
+}
+void updateBullets() {
+    int countMax = sizeof(bullets) / sizeof(bullets[0]);
+    for (int i = 0; i < countMax; i++) {
+        if (bullets[i].used) {
+            bullets[i].x += bullets[i].speed;
+            if (bullets[i].x > WIN_WIDTH) {
+                bullets[i].used = false;
+            }
+        }
+        // 待实现子弹的碰撞检测
+        if (bullets[i].blast) {
+            bullets[i].frameIndex++;
+            if (bullets[i].frameIndex >= 4) {
+                bullets[i].used = false;
+            }
+        }
+    }
+}
+void collisionCheck() {
+    int bCount = sizeof(bullets) / sizeof(bullets[0]);
+    int zCount = sizeof(zms) / sizeof(zms[0]);
+    for (int i = 0; i < bCount; i++) {
+        if (bullets[i].used == false || bullets[i].blast) continue;
+        for (int k = 0; k < zCount; k++) {
+            if (zms[k].used == false) continue;
+            int x1 = zms[k].x + 80;
+            int x2 = zms[k].x + 110;
+            int x = bullets[i].x;
+            if (bullets[i].row == zms[k].row && x > x1 && x < x2) {
+        zms[k].blood -= 20;
+        bullets[i].blast = true;
+        bullets[i].speed = 0;
+    }
+}
+    }
+}
 void updateGame() {
 	for (int i = 0; i < 3; i++) {
 		for (int j = 0; j < 9; j++) {
@@ -321,8 +457,10 @@ void updateGame() {
 	updateSunshine();
 	createZM();
 	updateZM();
+	shoot();
+	updateBullets():
+        collisionCheck():
 }
-
 void startUI() {
 	IMAGE imgBg, imgMenu1, imgMenu2;
 	loadimage(&imgBg, "res/menu.png");
