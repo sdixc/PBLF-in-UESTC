@@ -3,6 +3,8 @@
 #include "tools.h"
 #include <time.h>
 #include <math.h>
+#include "vector2.h"
+
 #include <mmsystem.h>
 #pragma comment(lib, "winmm.lib")
 #define WIN_WIDTH	1000
@@ -23,9 +25,16 @@ int curZhiWu;	//0未选中 1第一种植物
 struct zhiwu {
 	int type;			//0没有植物 1选择第一种植物
 	int frameIndex;		//序列帧的序号
+	bool catched;//是否被僵尸捕获
+	int deadTime;//死亡计数器
+
+	int timer;
+	int x,y;
 };
 
 struct zhiwu map[3][9];
+
+enum {SUNSHINE_DOWN,SUNSHINE_GROUND,SUNSHINE_COLLECT<SUNSHINE_RPODUCT}
 struct sunshineBall {
 	int x , y;//飘落过程位置 x不变
 	int frameIndex;
@@ -34,6 +43,13 @@ struct sunshineBall {
         int timer;
         float xoff;
         float yoff;
+
+		float t;
+		vector2 p1,p2,p3,p4;
+		vector2 pCur;
+		float speed;
+		int status;
+
 };
 struct sunshineBall balls[10];
 IMAGE imgSunshineBall[29];
@@ -45,9 +61,13 @@ struct zm {
     int speed;
     int row ;
     int blood; 
+	bool dead;
+	bool eating;//正在吃植物
 };
 struct zm zms[10];
 IMAGE imgZM[22];
+IMAGE imgZMDead[20];
+IMAGE imgZMEeat[21];
 
 //子弹的数据类型
 struct bullet {
@@ -145,6 +165,16 @@ for (int i = 0; i < 3; i++) {
               imgBullBlast[3].getwidth() * k,
               imgBullBlast[3].getheight() * k, true);
 }
+
+for(int i = 0;i < 20;i++){
+	sprintf_s(name,sizeof(name),"res/zm_dead/%d.png",i + 1);
+	loadimage(&imgZMDead[i],name);
+}
+
+for(int i = 0; i < 21; i++){
+	sprintf_s(name."res/zm_eat/%d.png",i + 1);
+	loadimage(&imgZMEat[i],name);
+}
 }
 char scoreText[8];
 sprintf_s(scoreText,sizeof(scoreText),"%d",sunshine);
@@ -171,14 +201,24 @@ void collectSunshine(ExMessage* msg) {
     int h = imgSunshineBall[0].getHeight();
     for (int i = 0; i < count; i++) {
         if (balls[i].used) {
-            int x = balls[i].x;
-            int y = balls[i].y;
+            // int x = balls[i].x;
+            // int y = balls[i].y;
+			int x = balls[i].pCur.x;
+			int y = balls[i].pCur.y;
             if (msg->x > x && msg->x < x + w &&
                 msg->y > y && msg->y < y + h) {
                 balls[i].used = false;
+				balls[i].status = SUNSHINE_COLLECT;
                //sunshine += 25;
                 mciSendString("play res/sunshine.mp3",0,0,0);
-	    }
+	    		balls[i].p1 = balls[i].pCur;
+				balls[i].p4 = vector2(262,0);
+				balls[i].t = 0;
+				float distance = dis(balls[i].p1 - balls[i].p4);
+				float off = 8;
+				balls[i].speed = 1.0 / (distance / off);
+				break;
+		}
 	}
     }
 void userClick() {
@@ -206,6 +246,11 @@ void userClick() {
 				if (map[row][col].type == 0) {
 					map[row][col].type = curZhiWu;
 					map[row][col].frameIndex = 0;
+
+
+
+					map[row][col].x = 256 + col * 81;
+					map[row][col].y = 179 + row * 102 + 14;
 				}
 			}
 			curZhiWu = 0;
@@ -219,11 +264,29 @@ void drawZM() {
     for (int i = 0; i < zmCount; i++) {
         if (zms[i].used) {
             // 获取僵尸对应的图像指针，imgZM是图像数组，frameIndex是图像帧索引
-            IMAGE* img = &imgZM[zms[i].frameIndex];
+            // IMAGE* img = &imgZM[zms[i].frameIndex];
+			// IMAGE *img = (zms[i].dead) ? imgZMDead : imgZM;
+			IMAGE* img = NULL;
+			if(zms[i].dead) img = imgZMDead;
+			else if(zms[i].eating) img = imgZMEat;
+			else img = imgZM;
+
+			img += zms[i].frameIndex;
+
             // 在指定位置绘制图像，x和y是僵尸的坐标，img->getheight()获取图像高度
             putimagePNG(zms[i].x, zms[i].y - img->getheight(), img);
         }
     }
+}
+void drawSunshines(){
+	int ballMax = sizeof(balls) / sizeof(balls[0]);
+	for (int i = 0; i < ballMax; i++) {
+		//if (balls[i].used||balls[i].xoff) {
+		if(balls[i].used){
+			IMAGE* img = &imgSunshineBall[balls[i].frameIndex];
+			putimagePNG(balls[i].pCur.x, balls[i].pCur.y, img);
+		}
+	}
 }
 void updateWindow() {
 	BeginBatchDraw();//开始缓冲
@@ -240,11 +303,11 @@ void updateWindow() {
 	for (int i = 0; i < 3; i++) {
 		for (int j = 0; j < 9; j++) {
 			if (map[i][j].type > 0) {
-				int x = 256 + j * 81;
-				int y = 179 + i * 102;
+				// int x = 256 + j * 81;
+				// int y = 179 + i * 102;
 				int zhiWuType = map[i][j].type - 1;
 				int index = map[i][j].frameIndex;
-				putimagePNG(x, y, imgZhiWu[zhiWuType][index]);
+				putimagePNG(map[i][j].x,map[i][j].y, imgZhiWu[zhiWuType][index]);
 			}
 
 		}
@@ -256,13 +319,8 @@ void updateWindow() {
 		putimagePNG(curX - img->getwidth() / 2, curY - img->getheight() / 2, img);
 	}
 
-	int ballMax = sizeof(balls) / sizeof(balls[0]);
-	for (int i = 0; i < ballMax; i++) {
-		if (balls[i].used||balls[i].xoff) {
-			IMAGE* img = &imgSunshineBall[balls[i].frameIndex];
-			putimagePNG(balls[i].x, balls[i].y, img);
-		}
-	}
+drawSunshines();
+	
 	EndBatchDraw();//结束双缓冲
 }
 
@@ -282,13 +340,25 @@ void creatSunshine() {
 
 		balls[i].used = true;
 		balls[i].frameIndex = 0;
-		balls[i].x = 260 + rand() % (900 - 260);
-		balls[i].y = 60;
-		balls[i].destY = (rand() % 4) * 90 + 200;
-		balls[i].xoff = 0;
-		balls[i].yoff = 0;
+		// balls[i].x = 260 + rand() % (900 - 260);
+		// balls[i].y = 60;
+		// balls[i].destY = (rand() % 4) * 90 + 200;
+		// balls[i].xoff = 0;
+		// balls[i].yoff = 0;
+		balls[i].timer = 0;
+		balls[i].status = SUNSHINE_DOWN;
+		balls[i].t = 0;
+		balls[i].p1 = vector2(260 + rand() % (900 - 260), 60);
+		balls[i].p4 = vector2(balls[i].p1.x,200 + (rand() % 4) * 90);
+		int off = 2;
+		float distance = balls[i].p4.y - balls[i].p1.y;
+		balls[i].speed = 1.0 / (distance / off);
+
 	}
 }
+
+//向日葵生产阳光
+//to do.
 
 void updateSunshine() {
 	int BallMax = sizeof(balls) / sizeof(balls[0]);
@@ -332,12 +402,14 @@ static int count = 0;
     int zmMax = sizeof(zms) / sizeof(zms[0]);
     for (i = 0; i < zmMax && zms[i].used; i++);
     if (i < zmMax) {
+		memset(&zms[i], 0, sizeof(zms[i]);)
         zms[i].used = true;
         zms[i].x = WIN_WIDTH;
 	zms[i].row = rand() % 3;
         zms[i].y = 172 + (1 + zms[i].row) * 100;
         zms[i].speed = 1; 
 	zms[i].blood = 100;
+	zms[i].dead = false;
     }
 }
 }
@@ -366,7 +438,19 @@ static int count2 = 0;
         count2 = 0;
     for (int i = 0; i < zmMax; i++) {
         if (zms[i].used) {
-            zms[i].frameIndex = (zms[i].frameIndex + 1) % 22;
+				if(zms[i].dead){
+					zms[i].frsmeIndex++;
+					if(zms[i].frameIndex >= 20){
+						zms[i].used = false;
+					}
+				}
+				else if(zms[i].eating){
+					zms[i].frameIndex = (zms[i].frameIndex + 1) % 21;
+				}
+				else{
+					zms[i].frameIndex = (zms[i].frameIndex + 1) % 22;
+				}
+            
         }
     }
 }
@@ -397,7 +481,7 @@ if (count > 20) {
         bullets[k].row = i;
         bullets[k].speed = 6;
 	bullets[k].blast = false;
-	bullets[[k].frameIndex =  0;
+	bullets[k].frameIndex =  0;
         int zWX = 256 + j * 81;
         int zWY = 179 + i * 102 + 14;
         bullets[k].x = zWX + imgZhiWuMap[i][j].type - 1 [0] -> getwidth() - 10;
@@ -422,21 +506,72 @@ void updateBullets() {
         }
     }
 }
-void collisionCheck() {
-    int bCount = sizeof(bullets) / sizeof(bullets[0]);
+
+void checkBullet2Zm(){
+int bCount = sizeof(bullets) / sizeof(bullets[0]);
     int zCount = sizeof(zms) / sizeof(zms[0]);
     for (int i = 0; i < bCount; i++) {
         if (bullets[i].used == false || bullets[i].blast) continue;
         for (int k = 0; k < zCount; k++) {
-            if (zms[k].used == false) continue;
+            // if (zms[k].used == false) continue;
+			if (zms[k].used == false) continue;
             int x1 = zms[k].x + 80;
             int x2 = zms[k].x + 110;
             int x = bullets[i].x;
-            if (bullets[i].row == zms[k].row && x > x1 && x < x2) {
-        zms[k].blood -= 20;
+            if (zms[k].dead == false && bullets[i].row == zms[k].row && x > x1 && x < x2) {
+        zms[k].blood -=5;
         bullets[i].blast = true;
         bullets[i].speed = 0;
+
+		if(zms[k].blood <= 0){
+			zms[k].dead = true;
+			zms[k].speed = 0;
+			zms[k].frameIndex = 0;
+		}
+		break;
     }
+}
+
+void checkZm2ZhiWu(){
+	int zCount = sizeof(zms) / sizeof(zms[0]);
+	for(int i = 0; i < zCount; i++){
+		if(zms[i].dead) continue;
+
+		int row = zms[i].row;
+		for(int k = 0; k < 9; k++){
+			if(map[row][k].type == 0) continue;
+			int zhiWuX = 256 + k * 81;
+			int x1 = zhiWuX + 10;
+			int x2 = zhiWuX + 60;
+			int x3 = zms[i].x + 80;
+			if(x3 > x1 && x3 < x2){
+				if(map[row][k].catched){
+					//zms[i].frameIndex++;
+					map[row][k].deadTime++;
+					//if(zms[i].frameIndex > 100){
+					if(map[row][k].deadTime > 100){
+						map[row][k].deadTime = 0;
+						map[row][k].type = 0;
+						zms[i].eating = false;
+						zms[i].frameIndex = 0;
+						zms[i].speed = 1;
+					}
+				}
+			else{
+				map[row][k].catched = true;
+				map[row][k].deadTime = 0;
+				zms[i].eatiing = true;
+				zms[i].speed = 0;
+				zms[i].frameIndex = 0;
+			}
+
+		}
+	}
+}
+
+void collisionCheck() {
+    checkBullet2Zm();
+	checkZm2ZhiWu();
 }
     }
 }
